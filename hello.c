@@ -11,7 +11,7 @@ __init static int hello_init(void)
 }
 __exit static void hello_exit(void)
 {
-  pr_info("Ciao world!\n");
+  pr_info("See ya world!\n");
   return;
 }
 module_init(hello_init);
