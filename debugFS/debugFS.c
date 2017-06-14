@@ -14,21 +14,17 @@ static const char dir_name[] = "zuehlke";
 static const char file1_name[] = "id";
 static const char file2_name[] = "jiffies";
 static const char file3_name[] = "foo";
-static struct dentry *debugFS;
+static struct dentry *debugFS; //dentry could be reused
 static struct dentry *id;
+static struct dentry *j;
 static struct dentry *foo;
-static void *data;
 static const char buffer[] = "ZuehlkeCamp2017\n\0";
 static const int length_bf = strlen(buffer);
+static rwlock_t data_lock;
+static uint8_t *data;
 
-//static rwlock_t data_lock;
-//at the beggining of exit and end of goto error handling in init
-//if data != NULL kzfree(data)
 //in init:
-//dentry could be reused
-//data = NULL
-//rwlock_init(&data_lock)
-//data = kzalloc(PAGE_SIZE, GPP_KERNEL)
+
 //foo create file
 //...
 //foo read:
@@ -98,16 +94,37 @@ static ssize_t foo_read(struct file *fd,
 			 size_t len,
 			 loff_t *ppos)
 {
-	return simple_read_from_buffer(buf, len, ppos,
-				       buffer, strlen(buffer));
+	int res = 0;
+	read_lock(&data_lock);
+	res = simple_read_from_buffer(buf, len, ppos, data, PAGE_SIZE);
+	read_unlock(&data_lock);
+	return res;
+}
+static ssize_t foo_write(struct file *fd,
+			  const char __user *buf,
+			  size_t len,
+			  loff_t *ppos)
+{
+	int res = 0;
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+	write_lock(&data_lock);
+	res = simple_write_to_buffer(data, PAGE_SIZE, ppos, buf, len);
+	write_unlock(&data_lock);
+	return res;
 }
 static const struct file_operations foo_fops = {
 	.read = foo_read,
+	.write = foo_write,
 };
 
 //---------------------------------------------------------------------------
 static int __init debugFS_init(void)
 {
+	data = NULL;
+	rwlock_init(&data_lock);
+	data = kzalloc(PAGE_SIZE, GFP_KERNEL);
+
 	/* Create directory */
 	debugFS = debugfs_create_dir(dir_name, NULL);
 	if (IS_ERR_OR_NULL(debugFS))
@@ -115,36 +132,35 @@ static int __init debugFS_init(void)
 
 	/* Create file "id" */
 	id = debugfs_create_file(file1_name, 0666,
-							debugFS, data, &zuehlke_fops);
+							debugFS, NULL, &zuehlke_fops);
 	if (IS_ERR_OR_NULL(id))
 		goto error_handler;
 
 	/* Create file "jiffies" */
-	jiffies = debugfs_create_file(file2_name, 0444,
-							debugFS, data, &jiffies_fops);
-	if (IS_ERR_OR_NULL(jiffies))
-		goto error_handler; //bla bla
+	j = debugfs_create_file(file2_name, 0444,
+							debugFS, NULL, &jiffies_fops);
+	if (IS_ERR_OR_NULL(j))
+		goto error_handler;
 
 	/* Create file "foo" */
 	foo = debugfs_create_file(file3_name, 0644,
 							debugFS, data, &foo_fops);
 	if (IS_ERR_OR_NULL(foo))
-		goto error_handler; //bla bla
-
-
+		goto error_handler;
 
 	return 0;
 
-//debugfs_remove(foo);
-//debugfs_remove(jiffies);
-//debugfs_remove(id);
 error_handler:
 	debugfs_remove_recursive(debugFS);
+	if (data != NULL)
+		kzfree(data);
 	return -ENODEV;
 }
 
 static void __exit debugFS_exit(void)
 {
+	if (data != NULL)
+		kzfree(data);
 	debugfs_remove_recursive(debugFS);
 }
 
