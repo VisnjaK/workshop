@@ -3,6 +3,9 @@
 #include <linux/miscdevice.h>
 #include <linux/fs.h>
 #include <linux/debugfs.h>
+#include <linux/rwlock.h>
+#include <linux/slab.h>
+#include <linux/capability.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Visnja Krsmanovic");
@@ -17,6 +20,27 @@ static struct dentry *foo;
 static void *data;
 static const char buffer[] = "ZuehlkeCamp2017\n\0";
 static const int length_bf = strlen(buffer);
+
+//static rwlock_t data_lock;
+//at the beggining of exit and end of goto error handling in init
+//if data != NULL kzfree(data)
+//in init:
+//dentry could be reused
+//data = NULL
+//rwlock_init(&data_lock)
+//data = kzalloc(PAGE_SIZE, GPP_KERNEL)
+//foo create file
+//...
+//foo read:
+//read_lock(&data_lock)
+//res = simple_read_from_buffer(buf, len, off, data, PAGE_SIZE )..
+//read_unlock(&data_lock)
+//write:
+//if (!capable(CAP_SYS_ADMIN))
+//return -EPERM
+//write_lock(&data_lock)
+//res = simple_write_to_buffer(daya, PAGE_SIZE,..)
+//write_unlock
 
 /* File zuehlke */
 static ssize_t simple_read(struct file *fd,
@@ -59,7 +83,7 @@ static ssize_t jiffies_read(struct file *fd,
 {
 	u64 j = get_jiffies_64();
 	char jbuf[256];
-	sprintf(jbuf, "%llu", j); // or atoi?
+	sprintf(jbuf, "%llu\n", j); // or atoi?
 
 	return simple_read_from_buffer(buf, len, ppos,
 				       jbuf, strlen(jbuf));
